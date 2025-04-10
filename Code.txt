@@ -1,1 +1,37 @@
+# code for uploading csv file
+import pandas as pd
+from google.cloud import bigtable
+
+
+project_id = "mystical-moon-451521-d2"
+instance_id = "ev-bigtable"
+table_id = "ev-population"
+column_family_id = "ev_info"
+csv_path = "Electric_Vehicle_Population_Data.csv"  
+
+
+client = bigtable.Client(project=project_id, admin=True)
+instance = client.instance(instance_id)
+table = instance.table(table_id)
+
+
+df = pd.read_csv(csv_path)
+df.fillna("", inplace=True)  
+
+
+columns_to_upload = ["Make", "Model", "Model Year", "Electric Range", "City", "County"]
+
+
+count = 0
+for _, row in df.iterrows():
+    count +=1
+    if count%1000 == 0:
+        print(count)
+    row_key = str(row["DOL Vehicle ID"]).encode("utf-8")
+    entry = table.direct_row(row_key)
+
+    for col in columns_to_upload:
+        entry.set_cell(column_family_id, col, str(row[col]))
+
+    entry.commit()
 
