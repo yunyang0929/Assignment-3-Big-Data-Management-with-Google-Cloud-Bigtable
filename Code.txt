@@ -1,4 +1,4 @@
-# code for uploading csv file
+# The script for loading data into Bigtable
 import pandas as pd
 from google.cloud import bigtable
 
@@ -16,22 +16,106 @@ table = instance.table(table_id)
 
 
 df = pd.read_csv(csv_path)
-df.fillna("", inplace=True)  
 
 
 columns_to_upload = ["Make", "Model", "Model Year", "Electric Range", "City", "County"]
 
 
-count = 0
-for _, row in df.iterrows():
-    count +=1
-    if count%1000 == 0:
-        print(count)
-    row_key = str(row["DOL Vehicle ID"]).encode("utf-8")
-    entry = table.direct_row(row_key)
+for i in range(len(df)):
+    if i%2000 == 0:
+        print(i)
 
-    for col in columns_to_upload:
-        entry.set_cell(column_family_id, col, str(row[col]))
+    row = df.iloc[i]
+    
+    try:
+        row_key = str(row["DOL Vehicle ID"]).encode("utf-8")
+        entry = table.direct_row(row_key)
+        for col in columns_to_upload:
+            entry.set_cell(column_family_id, col.encode("utf-8"), str(row[col]).encode("utf-8"))
+        entry.commit()
+    except:
+        print(i)
 
+# The script for querying, updating, and deleting records
+from flask import Flask
+from google.cloud import bigtable
+import warnings
+
+warnings.filterwarnings("ignore")
+
+
+project_id = "mystical-moon-451521-d2"
+instance_id = "ev-bigtable"
+table_id = "ev-population"
+column_family_id = "ev_info"
+
+client = bigtable.Client(project=project_id, admin=True)
+instance = client.instance(instance_id)
+table = instance.table(table_id)
+
+
+app = Flask(__name__)
+
+@app.route("/rows")
+def get_row_count():
+    row_count = 0
+    rows = table.read_rows()
+    for _ in rows:
+        row_count += 1
+    return str(row_count)
+
+@app.route("/Best-BMW")
+def best_bmw():
+    count = 0
+    rows = table.read_rows()
+    for row in rows:
+        cell = row.cells.get(column_family_id, {})
+        make = cell[b"Make"][0].value.decode("utf-8")  
+        ele_range = cell[b"Electric Range"][0].value
+        if make == "BMW" and float(ele_range) > 100:
+            count += 1
+    return str(count)
+
+
+@app.route("/tesla-owners")
+def tesla_owners():
+    count = 0
+    rows = table.read_rows()
+    for row in rows:
+        cell = row.cells.get(column_family_id, {})
+        make = cell[b"Make"][0].value.decode("utf-8")  
+        city = cell[b"City"][0].value.decode("utf-8")  
+        if make == "TESLA" and city == "Seattle":
+            count += 1
+    return str(count)
+
+
+@app.route("/update")
+def update_range():
+    entry = table.direct_row(b"257246118")
+    entry.set_cell(column_family_id, "Electric Range", b"200")
     entry.commit()
+    return "Success"
 
+
+@app.route("/delete")
+def delete_old():
+    
+    rows = table.read_rows()
+    for row in rows:
+        cell = row.cells.get(column_family_id, {})
+        year = cell[b"Model Year"][0].value.decode("utf-8")  
+        if int(year) < 2014:
+            temp = table.direct_row(row.row_key)
+            temp.delete()
+            temp.commit()
+
+
+    count = 0
+    rows = table.read_rows()
+    for _ in rows:
+        count += 1
+    return str(count)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
